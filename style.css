@@ -1,0 +1,114 @@
+@media screen and (min-width:641px){
+
+body, html {
+    height: 100%;
+    margin: 0;
+}
+
+.bg {
+    /* The image used */
+    background-image: url("bg.jpg");
+
+    /* Full height */
+    height: 100%; 
+
+    /* Center and scale the image nicely */
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+}
+
+.access {
+   position: absolute;
+   top: 80%;
+   left:40%;
+   margin:auto;
+}
+    
+.nav-pills > li {
+     float:none;
+     margin:0 auto;
+     display: inline-block;
+     margin: 15px;
+    
+}
+
+.nav-pills .active.nav-link { background-color:#fff; }
+.nav-pills > li > a {
+    background-color: dodgerblue;
+    border-color: dodgerblue;
+    z-index: 1;
+    color: white;
+    position: relative;
+    
+}
+
+.nav-pills > li > a:hover {
+    background-color: transparent;
+    color: #ffffff;
+    border-color: dodgerblue;
+    border-style: solid;
+
+    
+    
+}
+    
+}
+
+@media screen and (min-width:320px) and (max-width:640px) {
+ 
+    body, html {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+.bg {
+    /* The image used */
+    background-image: url("bg1.jpg");
+
+    /* Full height */
+    height: 100%; 
+
+    /* Center and scale the image nicely */
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+}
+    .access {
+   position: absolute;
+   top: 80%;
+   left: 25%;
+   margin:auto;
+}
+ 
+    .nav-pills > li {
+     float:none;
+     margin:0 auto;
+     display: inline-block;
+     margin: 15px;
+    
+}
+
+.nav-pills .active.nav-link { background-color:#fff; }
+.nav-pills > li > a {
+    background-color: dodgerblue;
+    border-color: dodgerblue;
+    z-index: 1;
+    color: white;
+    position: relative;
+    
+}
+
+.nav-pills > li > a:hover {
+    background-color: transparent;
+    color: #ffffff;
+    border-color: dodgerblue;
+    border-style: solid;
+
+    
+    
+}
+    
+}
+
