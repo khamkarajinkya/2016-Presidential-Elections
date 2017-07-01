@@ -1,0 +1,315 @@
+---
+title: <h1><center>United States Elections 2016</center></h2>
+output:html:
+    toc: False
+    smooth_scroll: TRUE
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, comment = NA)
+```  
+\newpage
+<h3>Introduction</h3>  
+  
+The dataset originally consisted of 64000+ samples with 517 independent variables. The independent variables are a combination of demographic information and important social and policy related questions. [The detailed information of the pre and post questionnaire, response types and sampling techniques are available here](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi%3A10.7910/DVN/GDF6Z0). For the purpose of this competition I have selected a subset of the dataset. The following conditions were used to filter records.  
+1) Individuals registered to vote [VoteReg=="Yes"]  
+2) Individuals who took the post election survey [tookPost=="Yes"]  
+3) Individuals who voted for either Hillary Clinton (Democratic candidate) or Donald Trump (Republican candidate)  
+
+Rest of the individuals would be used as an unseen test set.  
+  
+I have used 5 demographic and 12 policy related independent variables to build my model. I have built 2 models  
+1) A simple random forest ensemble learner.  
+2) A gradient boosted decision trees  
+  
+There is room for improvement with increasing the number of independent variables and using other complex learners.  
+  
+<h4>Model Information</h4>   
+  
+<h4>Variables</h4>  
+  
+The model consists of 17 independent variable and 1 dependent variable  
+  
+<h4>Independent variables</h4>  
+  
+1) **Commonweight** - Weight of sample based on its importance  
+2) **Gender**- Voter gender  
+3) **Education** - Education level of the voter  
+4) **Race** - Voter race  
+5) **State** - State in which the sample was recorded  
+6) **EmploymentStatus** - Current employment status of voter  
+7) **EconomyPast4** - Voter's response to whether their personal income changed over the past 4 years    
+8) **EconomyNext** - Voter's response to how the economy would change under the new government    
+9) **GovRating** - Voter's response to whether they approve or disapprove of the previous government  
+10) **GrantLegalStatus** - Voter's response to whether undocumented aliens should be granted legal status
+11) **Deportation** - Voter's response to whether undocumented aliens should be deported  
+12) **CleanAir** - Voter's response to whether clean air should be an agenda    
+13) **DefenseCut** - Voter's response to whether there should be a cut in defense funding  
+14) **RaiseTax** - Voter's response to whether taxes should be raised  
+15) **MediCare** - Voter's response to whether Medicare program should be repealed    
+16) **ObamaCare** - Voter's response to whether Affordable Care act be repealed  
+17) **MinWage** - Voter's response to whether minimum wage should be increased  
+18) **guncontrol** -  Voter's response to whether gun control should be strengthened  
+  
+<h4>Dependent variable</h4>  
+  
+1) **VotedFor** - Voter's true preference  
+  
+<h4>Libraries used</h4>  
+  
+1) **hot.deck** - For probability based imputation of missing values in records
+2) **ranger** - A fast implementation of a random forest learner with provision for inclusion sample weights, samples with higher weights have higher sampling frequency  
+3) **GBM** - Gradient boosted decision trees with provision for sample weights  
+4) **mlR** - For parameter tuning, accuracy metrics and evaluating performance of model on randomly sampled test sets  
+5) **ggplot2** - For plots  
+6) **caret** -  For calibration and confusion matrix  
+  
+<h4>Initial analysis</h4>  
+  
+```{r load}
+library(mlr)
+library(ranger)
+library(knitr)
+library(tibble)
+library(hot.deck)
+library(ggplot2)
+library(caret)
+
+df=data.frame(get(load("Subset1.RData"))[,c("commonweight","gender", 
+                          "edloan", 
+                          "race",
+                          "state",
+                          "economyyear",
+                          "economynext",
+                          "govrating",
+                          "grantlegstatus",
+                          "deportation",
+                          "cleanair",
+                          "defensecut",
+                          "raisetax",
+                          "guncontrol",
+                          "medicare",
+                          "obamacare",
+                          "minwage",
+                          "employmentstat",
+                          "vote2016")])
+
+
+
+df.init=data.frame(Levels = sapply(df,function(x)(length(unique(x)))),
+                   Categorical = sapply(df,is.factor),
+                   Missing = sapply(df,function(x)(sum(is.na(x)))))
+df.init
+```
+  
+<h4>Missing value imputation</h4>    
+  
+Missing values have been imputed using hot deck technique with probability draws. Missing values due to non-response have been imputed using observed values from a respondent that is similar. The records hold similarity in demographic characteristics and policy stance. I'm using a multi donor approach, the model will be fit for each of the imputed datasets and its performance will be evaluated to select the best imputed set.    
+
+```{r imputation,echo=TRUE}
+#The imputed file is saved as train.Rdata
+
+#dropping factor order 
+
+df[,2:ncol(df)]=data.frame(sapply(df[,2:ncol(df)],
+                                  function(x)(factor(x,ordered = FALSE))))
+
+#Hot deck imputation, saving the first imputed set as the train set
+df=data.frame(hot.deck(df,m=2,method = "p.draw")$data[[1]])
+
+df.init=data.frame(Levels = sapply(df,function(x)(length(unique(x)))),
+                   Categorical = sapply(df,is.factor),
+                   Missing = sapply(df,function(x)(sum(is.na(x)))))
+df.init
+
+#File is available under the data folder, you can directly use this dataset for training
+save(df,file="train.RData")
+```
+  
+We do not need any data preprocessing as our data is categorical with a limited number of levels for each explanatory variable.  
+  
+<h4>Random Forest based approach</h4>  
+  
+Ranger offers an excellent fast implementation of random forest with provision for inclusion of sample weights, samples with higher weight have higher sampling frequency. Parameters are tuned using 5fold cross validation techniques. The metrics used to gauge the performance of the model are Area under the curve (AUC), F1-score, Logarithmic loss.  
+  
+<h4>Cross validation</h4>    
+  
+```{r rfe,echo=TRUE,warning=TRUE}
+
+set.seed(1000)
+
+#MlR Cross validation (I have cross-validated using a single iteration in this report, I have alreay fine tuned this model)
+
+param = makeParamSet(
+makeDiscreteParam("num.trees", values = c(1000)),  
+makeDiscreteParam("min.node.size", values = c(60)),
+makeDiscreteParam("mtry",values=c(4)))
+
+
+task=makeClassifTask(id = deparse(substitute(df)), df[,2:19],"vote2016",
+weights = df$commonweight, blocking = NULL, positive = NA_character_,
+fixup.data = "warn", check.data = TRUE)
+
+ctrl = makeTuneControlGrid()
+rdesc = makeResampleDesc("CV", iters = 3L)
+
+
+classif.ranger=makeLearner("classif.ranger",predict.type = "prob")
+
+tuneParams(classif.ranger, task = task, resampling = rdesc,
+par.set = param, control = ctrl,measures = list(auc,f1,logloss))
+
+#best tuned 
+classif.ranger=makeLearner("classif.ranger",predict.type = "prob"
+,num.trees=500
+,min.node.size=40
+,mtry=4)
+
+
+n = getTaskSize(task)
+train.set = sample(n, size = 2*n/3)
+test.set = setdiff(1:n, train.set)
+
+model = mlr::train(classif.ranger, task, subset = train.set,weights = df[train.set,1])
+pred1 = predict(model, task = task,subset = test.set)
+```
+  
+<h4>ROC analysis for random Forest</h4>  
+
+```{r rfe_roc,echo=TRUE}
+rfe_roc_val = generateThreshVsPerfData(pred1, measures = list(fpr, tpr))
+qplot(x = fpr, y = tpr, data = rfe_roc_val$data, geom = "path")
+
+performance(pred1,measures = list(mmce, acc,auc,f1))
+```
+  
+We can infer that our model does a relatively good job to classify voters. The curve is well aligned with the true positive axis. Additionally high AUC and accuracy and the f1 score indicate our model fits the data well and has classification power  
+  
+<h4>Gradient Boosting Decision trees</h4>
+  
+  Additionally I have used gradient boosting algorithmm with a low learning rate and feature interaction to capture possible interactions between demographic characteristics and policy decisions  
+
+```{r gbm,echo=TRUE,warning=TRUE}
+
+#MlR Cross validation (I have cross-validated using a single iteration in this report, I have alreay fine tuned this model)
+
+param = makeParamSet(
+  makeDiscreteParam("n.trees", values = c(1000)),
+  makeDiscreteParam("shrinkage", values = c(0.03)),
+  makeDiscreteParam("interaction.depth",values=c(4)),
+  makeDiscreteParam("bag.fraction",values=c(0.4)))
+
+classif.gbm=makeLearner("classif.gbm",predict.type = "prob")
+
+res=tuneParams(classif.gbm, task = task, resampling = rdesc,
+               par.set = param, control = ctrl,measures = list(auc,f1,logloss))
+
+print((as.data.frame(res$opt.path)))
+
+
+classif.gbm=makeLearner("classif.gbm",predict.type = "prob"
+                        ,n.trees=1000
+                        ,shrinkage=0.03
+                        ,interaction.depth=5
+                        ,bag.fraction=0.6
+)
+
+n = getTaskSize(task)
+train.set = sample(n, size = 2*n/3)
+test.set = setdiff(1:n, train.set)
+
+model = mlr::train(classif.gbm, task, subset = train.set,weights = df[train.set,1])
+pred2 = predict(model, task = task,subset = test.set)
+```
+  
+<h4>ROC Analysis of Gradient Boosting</h4>
+  
+```{r gbm_roc, echo=TRUE}
+gbm_roc_val = generateThreshVsPerfData(pred2, measures = list(fpr, tpr))
+qplot(x = fpr, y = tpr, data = gbm_roc_val$data, geom = "path")
+performance(pred2,measures = list(mmce, acc,auc,f1))
+```
+  
+We can infer that our model does a good job to classify voters. The curve is well aligned with the true positive axis. Additionally high AUC and accuracy and the f1 score indicate our model fits the data well and has classification power  
+  
+<h4> Comparing the performance of the GBM model to Random Forest Model </h4>
+```{r comp}
+roc_val = generateThreshVsPerfData(list(RF = pred1, GBM = pred2), measures = list(fpr, tpr))
+qplot(x = fpr, y = tpr, color = learner, data = roc_val$data, geom = "path")
+```
+
+We see that the performance of the Gradient boosting model is pretty similar to the random forest model, we will use the gradient boosting model to make our predictions  
+  
+<h4> Can we improve our performance using a stacked classifier ? </h4>
+  
+We will pass our predicted probabilities through a logistic regression classifier, logistic regression thrashes the model's confidence in predicting class probabilities by passingit through a sigmoid function, this would ensure our model does well on rare cases which are difficult to predict  
+  
+```{r stacked, echo=TRUE}
+#predict on original dataset
+
+pred3=predict(model, task = task)
+performance(pred3,measures = list(mmce, acc,auc,f1))
+df1=data.frame(id=pred3$data$id, prob=pred3$data$`prob.Hillary Clinton (Democrat)`
+               ,truth=pred3$data$truth)
+logitmodel= glm(truth~., data = df1[,2:3],family=binomial(link='logit'))
+
+
+#let's make individual calibaration plots
+logit_probs=data.frame(probs=logitmodel$fitted.values,labels=df1$truth)
+
+#calibaration plot 0
+cal_0_plot = calibration(labels ~ probs,data = logit_probs,
+                         class = "Hillary Clinton (Democrat)")$data
+
+ggplot()+xlab("Bin Midpoint Class 0")+geom_line(data = cal_0_plot, aes(midpoint, Percent), color = "#F8766D")+
+geom_point(data = cal_0_plot, aes(midpoint, Percent),color = "#F8766D", size = 3) +
+geom_line(aes(c(0, 100), c(0, 100)), linetype = 1, color = 'grey50')+ggtitle("Calibration Plot")
+```
+  
+We can see that our model closely follows 45* line for class 0 and 1, indicating the event rate is realistic and our model is not overestimating the probabilities of any class.  
+  
+Let us see, if there is any improvement in the predictive ability of our model  
+  
+```{r stack_pred,echo=TRUE}
+res = predict(logitmodel,newdata=df1[,2:3],type='response')
+res=ifelse(res > 0.5,"Hillary Clinton (Democrat)","Donald Trump (Republican)")
+confusionMatrix(res, df1$truth,mode = "everything")
+```
+  
+Stacking does not really improve the performance of our model, finally we will predict an unseen test class, these are the individuals who voted for candidates other than Clinton and Trump, the assumtions here is that, given only 2 choices who would they have possibly voted for  
+  
+```{r test_clean,echo=TRUE}
+
+test=data.frame(get(load("test.RData"))[,c("commonweight","gender", 
+                      "edloan", 
+                      "race",
+                      "state",
+                      "economyyear",
+                      "economynext",
+                      "govrating",
+                      "grantlegstatus",
+                      "deportation",
+                      "cleanair",
+                      "defensecut",
+                      "raisetax",
+                      "medicare",
+                      "guncontrol",
+                      "obamacare",
+                      "minwage",
+                      "employmentstat")])
+
+#impute missing values  
+test[,2:ncol(test)]=data.frame(sapply(test[,2:ncol(test)],
+                                  function(x)(factor(x,ordered = FALSE))))
+
+#Hot deck imputation
+test=data.frame(hot.deck(test,m=2,method = "p.draw")$data[[1]])
+
+#Test dataset, records with candidates other than Trump and Clinton  
+pred4 = predict(model, newdata = test)
+final_test=cbind(test,pred4)
+
+final=rbind(cbind(df[,2:18],pred3$data[,3:5]),final_test[,2:ncol(final_test)])
+
+#file used in tableau viz challenge
+save(final,file = "Prediction.Rdata")
+```
